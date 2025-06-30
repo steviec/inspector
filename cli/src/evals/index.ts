@@ -2,6 +2,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import fs from "node:fs";
 import path from "node:path";
 import debug from "debug";
+import YAML from "yaml";
+import stripJsonComments from "strip-json-comments";
 import { validateEvalConfig } from "./schema.js";
 import type {
   EvalsConfig,
@@ -148,7 +150,7 @@ async function runSingleEval(
 }
 
 /**
- * Load and validate evals configuration from JSON file
+ * Load and validate evals configuration from JSON, JSONC, or YAML file
  * Resolves relative paths and applies schema validation with helpful error messages
  */
 function loadConfig(configPath: string): EvalsConfig {
@@ -162,13 +164,31 @@ function loadConfig(configPath: string): EvalsConfig {
   }
 
   const content = fs.readFileSync(resolvedPath, "utf8");
+  const ext = path.extname(resolvedPath).toLowerCase();
   let config: unknown;
 
   try {
-    config = JSON.parse(content);
+    switch (ext) {
+      case ".json":
+      case ".jsonc":
+        config = JSON.parse(stripJsonComments(content));
+        break;
+      case ".yaml":
+      case ".yml":
+        config = YAML.parse(content);
+        break;
+      default:
+        // Try JSON first, then YAML as fallback
+        try {
+          config = JSON.parse(stripJsonComments(content));
+        } catch {
+          config = YAML.parse(content);
+        }
+        break;
+    }
   } catch (error) {
     throw new Error(
-      `Invalid JSON in eval config file: ${error instanceof Error ? error.message : "Unknown error"}`,
+      `Invalid config format in eval config file: ${error instanceof Error ? error.message : "Unknown error"}`,
     );
   }
 
