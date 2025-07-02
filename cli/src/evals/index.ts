@@ -97,56 +97,63 @@ async function runSingleEval(
   evalTest: EvalTest,
   config: SingleEvalConfig,
 ): Promise<EvalResult> {
-  try {
-    // Execute LLM conversation with tool calling enabled
-    const messages = await llmProvider.executeConversation(
-      mcpClient,
-      evalTest.prompt,
-      config,
-    );
+  // Execute LLM conversation with tool calling enabled
+  const conversationResult = await llmProvider.executeConversation(
+    mcpClient,
+    evalTest.prompt,
+    config,
+  );
 
-    // Validate tool usage against expected behavior
-    const toolResults = llmProvider.extractToolCallResults(messages);
-    const toolValidationErrors = validateToolCalls(
-      evalTest.expectedToolCalls,
-      toolResults,
-    );
+  const { messages, success, error } = conversationResult;
 
-    // Evaluate response quality using configured scorers (regex, schema, LLM judge)
-    const scorerResults = evalTest.responseScorers
-      ? await runResponseScorers(
-          evalTest.responseScorers,
-          messages,
-          llmProvider,
-        )
-      : [];
-    const scorerErrors = createScorerErrorMessages(
-      scorerResults,
-      evalTest.responseScorers,
-    );
-
-    // Combine all validation errors to determine pass/fail
-    const allErrors = [...toolValidationErrors, ...scorerErrors];
-    const passed = allErrors.length === 0;
-
-    return {
-      name: evalTest.name,
-      model: config.model,
-      passed,
-      errors: allErrors,
-      scorerResults,
-      messages,
-    };
-  } catch (error) {
-    // Handle unexpected errors (connection issues, provider failures, etc.)
+  // If conversation failed, return early with error
+  if (!success) {
     return {
       name: evalTest.name,
       model: config.model,
       passed: false,
-      errors: [error instanceof Error ? error.message : "Unknown error"],
+      errors: [error || "Conversation failed"],
       scorerResults: [],
+      messages,
     };
   }
+
+  // Conversation succeeded, continue with validation
+  const allErrors: string[] = [];
+
+  // Validate tool usage against expected behavior
+  const toolResults = llmProvider.extractToolCallResults(messages);
+  const toolValidationErrors = validateToolCalls(
+    evalTest.expectedToolCalls,
+    toolResults,
+  );
+  allErrors.push(...toolValidationErrors);
+
+  // Evaluate response quality using configured scorers (regex, schema, LLM judge)
+  const scorerResults = evalTest.responseScorers
+    ? await runResponseScorers(
+        evalTest.responseScorers,
+        messages,
+        llmProvider,
+      )
+    : [];
+  const scorerErrors = createScorerErrorMessages(
+    scorerResults,
+    evalTest.responseScorers,
+  );
+  allErrors.push(...scorerErrors);
+
+  // Determine pass/fail based on all validation errors
+  const passed = allErrors.length === 0;
+
+  return {
+    name: evalTest.name,
+    model: config.model,
+    passed,
+    errors: allErrors,
+    scorerResults,
+    messages,
+  };
 }
 
 /**

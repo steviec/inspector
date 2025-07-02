@@ -6,13 +6,19 @@ import type {
   ToolCallResult,
 } from "../types.js";
 
+export interface ConversationResult<LlmMessage = unknown> {
+  messages: LlmMessage[];
+  success: boolean;
+  error?: string;
+}
+
 export interface LLMProvider<LlmMessage = unknown> {
   // Execute a conversation with tool calling - returns provider-specific format
   executeConversation(
     mcpClient: Client,
     prompt: string,
     config: SingleEvalConfig,
-  ): Promise<LlmMessage[]>;
+  ): Promise<ConversationResult<LlmMessage>>;
 
   // Individual parsing methods for provider-specific messages
   getAllAssistantText(messages: LlmMessage[]): string;

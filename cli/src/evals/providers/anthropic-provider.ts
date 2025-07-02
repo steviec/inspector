@@ -12,7 +12,7 @@ import type {
   LlmJudgeResult,
   ToolCallResult,
 } from "../types.js";
-import type { LLMProvider } from "./llm-provider.js";
+import type { LLMProvider, ConversationResult } from "./llm-provider.js";
 
 interface AnthropicTool {
   name: string;
@@ -40,47 +40,55 @@ export class AnthropicProvider implements LLMProvider<MessageParam> {
     mcpClient: Client,
     prompt: string,
     config: SingleEvalConfig,
-  ): Promise<MessageParam[]> {
+  ): Promise<ConversationResult<MessageParam>> {
     const tools = await this.getTools(mcpClient);
     let messages: MessageParam[] = [{ role: "user", content: prompt }];
 
-    let currentStep = 0;
-    while (currentStep < config.maxSteps) {
-      const response = await this.client.messages.create({
-        model: config.model,
-        max_tokens: 1024,
-        messages: messages,
-        system:
-          "You are an assistant that helps with tasks using the available tools. Use tools when appropriate to complete the user's request.",
-        tools: tools.length > 0 ? tools : undefined,
-      });
+    try {
+      let currentStep = 0;
+      while (currentStep < config.maxSteps) {
+        const response = await this.client.messages.create({
+          model: config.model,
+          max_tokens: 1024,
+          messages: messages,
+          system:
+            "You are an assistant that helps with tasks using the available tools. Use tools when appropriate to complete the user's request.",
+          tools: tools.length > 0 ? tools : undefined,
+        });
 
-      // Add assistant response to conversation
-      messages.push({
-        role: "assistant",
-        content: response.content,
-      });
+        // Add assistant response to conversation
+        messages.push({
+          role: "assistant",
+          content: response.content,
+        });
 
-      // Process tool calls if any
-      const toolResults = await this.processToolCalls(
-        mcpClient,
-        response.content,
-      );
+        // Process tool calls if any
+        const toolResults = await this.processToolCalls(
+          mcpClient,
+          response.content,
+        );
 
-      if (toolResults.length === 0) {
-        break; // No tool calls, conversation is done
+        if (toolResults.length === 0) {
+          break; // No tool calls, conversation is done
+        }
+
+        // Add tool results to conversation
+        messages.push({
+          role: "user",
+          content: toolResults,
+        });
+
+        currentStep++;
       }
 
-      // Add tool results to conversation
-      messages.push({
-        role: "user",
-        content: toolResults,
-      });
-
-      currentStep++;
+      return { messages, success: true };
+    } catch (error) {
+      return {
+        messages,
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
     }
-
-    return messages;
   }
 
   async runLLMJudge(
